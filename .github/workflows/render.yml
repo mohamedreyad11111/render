@@ -1,4 +1,4 @@
-name: Ofoq Video Renderer
+name: Ofoq Video Renderer (WebCodecs)
 
 on:
   workflow_dispatch:
@@ -11,29 +11,27 @@ jobs:
   build-video:
     runs-on: ubuntu-latest
     steps:
-      # تحديث إلى v4
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # تحديث النسخة لضمان الأداء
+          node-version: '20'
           
-      - name: Install Dependencies
+      - name: Install Playwright & Chromium
         run: |
-          npm install playwright ffmpeg-static
+          npm install playwright # لا نحتاج ffmpeg-static هنا
           npx playwright install chromium
 
-      - name: Render Video
+      - name: Render Video via WebCodecs
         env:
           USER_CODE: ${{ github.event.inputs.js_code }}
         run: node render_script.js
 
-      # التغيير الجوهري هنا: التحديث إلى v4
       - name: Upload Video
         uses: actions/upload-artifact@v4
         with:
-          name: Rendered_Video_${{ github.run_id }} # إضافة ID تجنباً لتكرار الأسماء
+          name: Rendered_Video_${{ github.run_id }}
           path: output.mp4
-          retention-days: 1 # لحذف الملف تلقائياً بعد يوم وتوفير المساحة
+          retention-days: 1
