@@ -3,13 +3,15 @@ const fs = require('fs');
 const path = require('path');
 
 const userCode = process.env.USER_CODE || '';
-const muxerLibPath = path.resolve('mp4-muxer.js');
+
+// تحديد مسار المكتبة من داخل node_modules بعد الـ npm install
+const muxerLibPath = path.resolve('node_modules', 'mp4-muxer', 'dist', 'mp4-muxer.min.js');
 
 (async () => {
-  console.log("🚀 تشغيل المحرك...");
+  console.log("🚀 تشغيل المحرك (NPM Mode)...");
   
   if (!fs.existsSync(muxerLibPath)) {
-    console.error("❌ المكتبة مش موجودة جنبك! اتاكد ان الـ wget اشتغل صح.");
+    console.error("❌ خطأ قاتل: مكتبة mp4-muxer لم تثبت عبر npm!");
     process.exit(1);
   }
 
@@ -18,8 +20,6 @@ const muxerLibPath = path.resolve('mp4-muxer.js');
   });
   
   const page = await browser.newPage();
-
-  // متابعة اللوجات
   page.on('console', msg => console.log('BROWSER:', msg.text()));
   page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));
 
@@ -27,12 +27,11 @@ const muxerLibPath = path.resolve('mp4-muxer.js');
   await page.exposeFunction('saveMp4ChunkToNode', (chunkBuffer) => {
     if (chunkBuffer) {
       fs.writeFileSync('output.mp4', Buffer.from(chunkBuffer));
-      console.log(`✅ عاااش! الفيديو طلع في output.mp4`);
+      console.log(`✅ تم الريندر بنجاح وحفظ الملف!`);
       done = true;
     }
   });
 
-  // 1. نجهز الصفحة فاضية الأول
   await page.setContent(`
     <html>
       <body style="margin:0; background:black;">
@@ -41,13 +40,14 @@ const muxerLibPath = path.resolve('mp4-muxer.js');
     </html>
   `);
 
-  // 2. نحقن المكتبة كملف (دي الطريقة الصح اللي بتمنع الـ Unexpected identifier)
+  // حقن المكتبة من المسار المحلي لـ node_modules
   await page.addScriptTag({ path: muxerLibPath });
 
-  // 3. نشغل الكود بعد ما نضمن ان المكتبة اتحقنت
   await page.evaluate(async (userCode) => {
     try {
-      console.log("🎥 الموكسر جاهز، الريندر بدأ...");
+      if (typeof Mp4Muxer === 'undefined') throw new Error("Mp4Muxer fails to load from node_modules");
+      
+      console.log("🎥 الموكسر جاهز، بدأنا الريندر...");
       
       const muxer = new Mp4Muxer.Muxer({
         target: new Mp4Muxer.ArrayBufferTarget(),
@@ -75,30 +75,27 @@ const muxerLibPath = path.resolve('mp4-muxer.js');
         const t = i / 30;
         
         try { 
-          // تنفيذ كود المستخدم
           eval(userCode); 
-        } catch(e) { console.error("User Code Error:", e.message); }
+        } catch(e) { console.error("JS Error:", e.message); }
         
         const frame = new VideoFrame(canvas, { timestamp: i * 33333 });
         encoder.encode(frame, { keyFrame: i % 30 === 0 });
         frame.close();
-        
-        if (i % 30 === 0) console.log("⏳ Processing: " + i);
+        if (i % 30 === 0) console.log("⏳ شغال في فريم: " + i);
       }
 
       await encoder.flush();
       muxer.finalize();
-      console.log("🏁 ريندر 10/10!");
+      console.log("🏁 ريندر 100%!");
       window.saveMp4ChunkToNode(muxer.target.buffer);
 
     } catch(err) {
-      console.error("Critical Error inside browser:", err.message);
+      console.error("Critical Error:", err.message);
     }
   }, userCode);
 
-  // تايم أوت أمان
   const timeout = setTimeout(() => {
-    console.log("❌ السكربت طول زيادة عن اللزوم.");
+    console.log("❌ السكريبت خد وقت طويل جداً.");
     process.exit(1);
   }, 180000); 
 
@@ -113,5 +110,5 @@ const muxerLibPath = path.resolve('mp4-muxer.js');
   });
 
   await browser.close();
-  console.log("🚀 Done.");
+  console.log("🚀 انتهى.");
 })();
