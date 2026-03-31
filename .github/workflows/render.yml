@@ -24,8 +24,8 @@ jobs:
           npm install playwright
           npx playwright install chromium
           sudo apt-get install -y xvfb
-          # تحميل المكتبة مباشرة في الفولدر الرئيسي لضمان المسار
-          wget https://cdn.jsdelivr.net/npm/mp4-muxer@4.0.1/dist/mp4-muxer.min.js -O mp4-muxer.js
+          # تحميل المكتبة من unpkg لأن الرابط التاني كان بايظ
+          wget https://unpkg.com/mp4-muxer@4.0.1/dist/mp4-muxer.min.js -O mp4-muxer.js
 
       - name: Render Video
         env:
