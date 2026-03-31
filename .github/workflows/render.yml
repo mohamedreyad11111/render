@@ -1,4 +1,4 @@
-name: Ofoq Video Renderer (WebCodecs Final)
+name: Ofoq Video Renderer (NPM Native)
 
 on:
   workflow_dispatch:
@@ -21,11 +21,10 @@ jobs:
           
       - name: Install Dependencies
         run: |
-          npm install playwright
+          # تثبيت المكتبات رسمياً من npm
+          npm install playwright mp4-muxer
           npx playwright install chromium
           sudo apt-get install -y xvfb
-          # تحميل المكتبة من رابط unpkg المضمون وحفظها باسم mp4-muxer.js
-          curl -L https://unpkg.com/mp4-muxer@4.0.1/dist/mp4-muxer.min.js -o mp4-muxer.js
 
       - name: Render Video
         env:
