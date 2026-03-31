@@ -6,115 +6,104 @@ const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.
 
 (async () => {
   try {
-    console.log("🚀 تشغيل المتصفح مع تفعيل WebCodecs...");
+    console.log("🚀 جاري تفعيل وضع الريندر الأقصى...");
 
     const browser = await chromium.launch({
-      headless: true,
+      headless: false, // خليه false عشان الـ WebCodecs بيشتغل أحسن في الـ Headful mode وxvfb هيقوم بالواجب
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-gpu',
-        '--use-gl=swiftshader',
-        '--enable-webcodecs', // أهم flag لتشغيل VideoEncoder
+        '--use-gl=swiftshader', // محاكي كارت شاشة سوفتوير
+        '--enable-features=WebCodecs,Vulkan', // تفعيل المزايا يدوياً
+        '--enable-blink-features=WebCodecs',
+        '--ignore-gpu-blocklist', // تجاهل إن مفيش كارت شاشة
         '--disable-software-rasterizer',
         '--disable-dev-shm-usage'
       ]
     });
     
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    
     page.on('console', msg => console.log('BROWSER:', msg.text()));
     page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));
 
     let done = false;
     await page.exposeFunction('saveVideo', (buffer) => {
         fs.writeFileSync('output.mp4', Buffer.from(buffer));
-        console.log(`✅ مبروك! الفيديو اتحفظ بنجاح.`);
+        console.log(`✅ تم الريندر وحفظ الملف بنجاح!`);
         done = true;
     });
 
-    await page.setContent(`
-      <html>
-        <head>
-          <script src="${MUXER_URL}"></script>
-        </head>
-        <body style="margin:0; background:black;">
-          <canvas id="c" width="1280" height="720"></canvas>
-          <script>
-            async function start() {
-              try {
-                // التأكد من أن WebCodecs مدعوم
-                if (typeof VideoEncoder === 'undefined') {
-                  throw new Error("VideoEncoder is NOT supported in this browser! Check flags.");
-                }
+    // هنحقن السكريبت بطريقة تانية عشان نتفادى الـ Block اللي ظهر في اللوج
+    await page.goto('about:blank');
+    await page.addScriptTag({ url: MUXER_URL });
 
-                console.log("🎥 الفيديو إنكودر جاهز، الريندر بدأ...");
-                
-                const muxer = new Mp4Muxer.Muxer({
-                  target: new Mp4Muxer.ArrayBufferTarget(),
-                  video: { 
-                    codec: 'avc', 
-                    width: 1280, 
-                    height: 720 
-                  }
-                });
+    await page.evaluate(async (code) => {
+      // دالة مساعدة للتأكد من الدعم
+      const checkSupport = () => {
+        return typeof VideoEncoder !== 'undefined';
+      };
 
-                const encoder = new VideoEncoder({
-                  output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata),
-                  error: (e) => console.error("Encoder Error:", e.message)
-                });
-
-                // استخدام كودك متوافق أكتر مع المتصفحات الوهمية
-                await encoder.configure({ 
-                  codec: 'avc1.42E01E', 
-                  width: 1280, 
-                  height: 720, 
-                  bitrate: 1_000_000,
-                  latencyMode: 'quality',
-                  hardwareAcceleration: 'prefer-software' // إجبار المتصفح على استخدام المعالج بدل كارت الشاشة
-                });
-
-                const canvas = document.getElementById('c');
-                const ctx = canvas.getContext('2d');
-
-                for (let i = 0; i < 90; i++) {
-                  ctx.clearRect(0, 0, 1280, 720);
-                  const t = i / 30;
-                  try {
-                    ${userCode}
-                  } catch(e) { console.error("User Code Error:", e.message); }
-                  
-                  const frame = new VideoFrame(canvas, { timestamp: i * 33333 });
-                  encoder.encode(frame, { keyFrame: i % 30 === 0 });
-                  frame.close();
-                  if(i % 30 === 0) console.log("⏳ Rendering Frame: " + i);
-                }
-
-                await encoder.flush();
-                muxer.finalize();
-                window.saveVideo(muxer.target.buffer);
-
-              } catch(err) {
-                console.error("CRITICAL:", err.message);
-              }
-            }
-            window.onload = start;
-          </script>
-        </body>
-      </html>
-    `);
-
-    const startWait = Date.now();
-    while (!done) {
-      if (Date.now() - startWait > 120000) {
-          console.log("❌ السكريبت علق في الانتظار.");
-          process.exit(1);
+      if (!checkSupport()) {
+        console.error("❌ لسه VideoEncoder مش شغال.. بنجرب Force Start...");
       }
+
+      console.log("🎥 بدء عملية الإنكودر...");
+      
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: { codec: 'avc', width: 1280, height: 720 }
+      });
+
+      const encoder = new VideoEncoder({
+        output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata),
+        error: (e) => console.error("Encoder Error:", e.message)
+      });
+
+      // إعدادات الـ Software Encoding
+      await encoder.configure({ 
+        codec: 'avc1.42E01E', 
+        width: 1280, 
+        height: 720, 
+        bitrate: 1_500_000,
+        hardwareAcceleration: 'prefer-software' // دي أهم واحدة!
+      });
+
+      const canvas = document.createElement('canvas'); // بنعمل الكانفاس جوه الـ JS أضمن
+      canvas.width = 1280;
+      canvas.height = 720;
+      document.body.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+
+      for (let i = 0; i < 90; i++) {
+        ctx.clearRect(0, 0, 1280, 720);
+        try {
+          const t = i / 30;
+          eval(code); 
+        } catch(e) { console.error("User Code Error:", e.message); }
+        
+        const frame = new VideoFrame(canvas, { timestamp: i * 33333 });
+        encoder.encode(frame, { keyFrame: i % 30 === 0 });
+        frame.close();
+        if(i % 30 === 0) console.log("⏳ Processing Frame: " + i);
+      }
+
+      await encoder.flush();
+      muxer.finalize();
+      window.saveVideo(muxer.target.buffer);
+    }, userCode);
+
+    // انتظار لحد ما يخلص
+    let waitTimer = 0;
+    while (!done && waitTimer < 120) {
       await new Promise(r => setTimeout(r, 1000));
+      waitTimer++;
     }
-    
+
     await browser.close();
-    console.log("🚀 انتهى بنجاح.");
-    process.exit(0);
+    process.exit(done ? 0 : 1);
 
   } catch (err) {
     console.error("❌ Fatal Error:", err.message);
