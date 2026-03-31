@@ -19,19 +19,21 @@ jobs:
         with:
           node-version: '20'
           
-      - name: Install Playwright & Chromium
+      - name: Install Dependencies
         run: |
-          npm install playwright # لا نحتاج ffmpeg-static هنا
+          npm install playwright
           npx playwright install chromium
+          # تثبيت المكتبة اللي بتعمل شاشة وهمية
+          sudo apt-get install -y xvfb
 
-      - name: Render Video via WebCodecs
+      - name: Render Video
         env:
           USER_CODE: ${{ github.event.inputs.js_code }}
-        run: node render_script.js
+        # تشغيل السكريبت داخل xvfb-run
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node render_script.js
 
       - name: Upload Video
         uses: actions/upload-artifact@v4
         with:
           name: Rendered_Video_${{ github.run_id }}
           path: output.mp4
-          retention-days: 1
