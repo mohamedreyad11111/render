@@ -21,15 +21,14 @@ jobs:
           
       - name: Install Dependencies
         run: |
-          npm install playwright
+          # ضفنا mp4-muxer هنا عشان تنزل مع باكدجات جيتهاب
+          npm install playwright mp4-muxer
           npx playwright install chromium
-          # تثبيت المكتبة اللي بتعمل شاشة وهمية
           sudo apt-get install -y xvfb
 
       - name: Render Video
         env:
           USER_CODE: ${{ github.event.inputs.js_code }}
-        # تشغيل السكريبت داخل xvfb-run
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node render_script.js
 
       - name: Upload Video
