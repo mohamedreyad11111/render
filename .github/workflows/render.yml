@@ -1,37 +1,46 @@
-name: Ofoq Video Renderer (Final Fix)
+name: Ofoq Video Renderer (FFmpeg Final)
 
 on:
   workflow_dispatch:
     inputs:
       js_code:
-        description: 'JS Code'
+        description: 'JS Code to render'
         required: true
 
 jobs:
   build-video:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           
-      - name: Install
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          # تثبيت ffmpeg و xvfb والمكتبات المساعدة للصور
+          sudo apt-get install -y ffmpeg xvfb libgbm-dev
+          
+      - name: Install Node Dependencies
         run: |
           npm install playwright
           npx playwright install chromium
-          sudo apt-get install -y xvfb
 
-      - name: Render
+      - name: Render Video Frames & Merge
         env:
           USER_CODE: ${{ github.event.inputs.js_code }}
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node render_script.js
+        run: |
+          mkdir -p frames
+          # تشغيل السكريبت اللي بيصور الفريمات وبعدين بيجمعها
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node render_script.js
 
-      - name: Upload
+      - name: Upload Video Result
         uses: actions/upload-artifact@v4
         with:
-          name: Video_Result
+          name: Ofoq_Rendered_Video
           path: output.mp4
+          if-no-files-found: error
