@@ -1,4 +1,4 @@
-name: Ofoq Video Renderer (WebCodecs)
+name: Ofoq Video Renderer (WebCodecs Local)
 
 on:
   workflow_dispatch:
@@ -21,10 +21,11 @@ jobs:
           
       - name: Install Dependencies
         run: |
-          # ضفنا mp4-muxer هنا عشان تنزل مع باكدجات جيتهاب
-          npm install playwright mp4-muxer
+          npm install playwright
           npx playwright install chromium
           sudo apt-get install -y xvfb
+          # تحميل المكتبة مباشرة في الفولدر الرئيسي لضمان المسار
+          wget https://cdn.jsdelivr.net/npm/mp4-muxer@4.0.1/dist/mp4-muxer.min.js -O mp4-muxer.js
 
       - name: Render Video
         env:
@@ -36,3 +37,4 @@ jobs:
         with:
           name: Rendered_Video_${{ github.run_id }}
           path: output.mp4
+          retention-days: 1
