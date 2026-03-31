@@ -2,27 +2,33 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 
 const userCode = process.env.USER_CODE || '';
-// الرابط اللي أنت بعته - النسخة الأحدث والمضمونة
 const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js";
 
 (async () => {
   try {
-    console.log("🚀 بدء المحرك باستخدام نسخة Mp4Muxer 5.2.2...");
+    console.log("🚀 تشغيل المتصفح مع تفعيل WebCodecs...");
 
     const browser = await chromium.launch({
-      args: ['--disable-gpu', '--no-sandbox', '--enable-webcodecs']
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-gpu',
+        '--use-gl=swiftshader',
+        '--enable-webcodecs', // أهم flag لتشغيل VideoEncoder
+        '--disable-software-rasterizer',
+        '--disable-dev-shm-usage'
+      ]
     });
     
     const page = await browser.newPage();
-
-    // متابعة اللوجات بدقة
     page.on('console', msg => console.log('BROWSER:', msg.text()));
     page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));
 
     let done = false;
     await page.exposeFunction('saveVideo', (buffer) => {
         fs.writeFileSync('output.mp4', Buffer.from(buffer));
-        console.log(`✅ عاااش يا وحش! الفيديو طلع في output.mp4`);
+        console.log(`✅ مبروك! الفيديو اتحفظ بنجاح.`);
         done = true;
     });
 
@@ -36,22 +42,20 @@ const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.
           <script>
             async function start() {
               try {
-                // التأكد من أن المكتبة تحملت
-                if (typeof Mp4Muxer === 'undefined') {
-                  throw new Error("لم يتم العثور على Mp4Muxer! الرابط قد يكون محجوباً.");
+                // التأكد من أن WebCodecs مدعوم
+                if (typeof VideoEncoder === 'undefined') {
+                  throw new Error("VideoEncoder is NOT supported in this browser! Check flags.");
                 }
 
-                console.log("🎥 المكتبة جاهزة، بدء الريندر...");
+                console.log("🎥 الفيديو إنكودر جاهز، الريندر بدأ...");
                 
-                // في النسخة 5.2.2 الاسم بيبقى Mp4Muxer.Muxer
                 const muxer = new Mp4Muxer.Muxer({
                   target: new Mp4Muxer.ArrayBufferTarget(),
                   video: { 
                     codec: 'avc', 
                     width: 1280, 
                     height: 720 
-                  },
-                  fastStart: 'fragmented'
+                  }
                 });
 
                 const encoder = new VideoEncoder({
@@ -59,11 +63,14 @@ const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.
                   error: (e) => console.error("Encoder Error:", e.message)
                 });
 
-                encoder.configure({ 
+                // استخدام كودك متوافق أكتر مع المتصفحات الوهمية
+                await encoder.configure({ 
                   codec: 'avc1.42E01E', 
                   width: 1280, 
                   height: 720, 
-                  bitrate: 3_000_000 
+                  bitrate: 1_000_000,
+                  latencyMode: 'quality',
+                  hardwareAcceleration: 'prefer-software' // إجبار المتصفح على استخدام المعالج بدل كارت الشاشة
                 });
 
                 const canvas = document.getElementById('c');
@@ -79,38 +86,34 @@ const MUXER_URL = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.
                   const frame = new VideoFrame(canvas, { timestamp: i * 33333 });
                   encoder.encode(frame, { keyFrame: i % 30 === 0 });
                   frame.close();
-                  if(i % 30 === 0) console.log("⏳ شغال في فريم: " + i);
+                  if(i % 30 === 0) console.log("⏳ Rendering Frame: " + i);
                 }
 
                 await encoder.flush();
                 muxer.finalize();
-                console.log("🏁 الريندر انتهى بنجاح!");
                 window.saveVideo(muxer.target.buffer);
 
               } catch(err) {
                 console.error("CRITICAL:", err.message);
               }
             }
-
-            // الانتظار للتأكد من تحميل المكتبة
             window.onload = start;
           </script>
         </body>
       </html>
     `);
 
-    // انتظار النتيجة
     const startWait = Date.now();
     while (!done) {
       if (Date.now() - startWait > 120000) {
-          console.log("❌ Timeout: الريندر خد أكتر من دقيقتين.");
+          console.log("❌ السكريبت علق في الانتظار.");
           process.exit(1);
       }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1000));
     }
     
     await browser.close();
-    console.log("🚀 تمت العملية.");
+    console.log("🚀 انتهى بنجاح.");
     process.exit(0);
 
   } catch (err) {
