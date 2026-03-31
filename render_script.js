@@ -1,129 +1,95 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-// جلب كود المستخدم من المتغيرات البيئية
 const userCode = process.env.USER_CODE || '';
 
 (async () => {
-  console.log("🚀 بدء تشغيل المتصفح الوهمي لريندر WebCodecs...");
-  // تشغيل المتصفح مع دعم تقنيات الفيديو الحديثة
-  const browser = await chromium.launch({
-    args: ['--enable-webcodecs', '--use-gl=angle', '--use-angle=vulkan'] 
-  });
-  const page = await browser.newPage();
+  console.log("🚀 بدء تشغيل المتصفح الوهمي بنظام Software Rendering...");
   
-  const outputPath = 'output.mp4';
-  if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); // مسح القديم لو موجود
+  const browser = await chromium.launch({
+    args: [
+      '--disable-gpu',
+      '--use-gl=swiftshader', // استخدام المعالج للرسم
+      '--enable-webcodecs',
+      '--no-sandbox'
+    ]
+  });
+  
+  const page = await browser.newPage();
 
-  // 1. إنشاء الجسر: دالة في Node.js سيتم استدعاؤها من داخل المتصفح
+  // توجيه لوجات المتصفح للـ Node.js عشان نشوف إيه اللي بيحصل جوه
+  page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
+
   let done = false;
   await page.exposeFunction('saveMp4ChunkToNode', (chunkBuffer) => {
-    // استقبال الـ Buffer النهائي وحفظه مباشرة في ملف MP4
     if (chunkBuffer) {
-      fs.writeFileSync(outputPath, Buffer.from(chunkBuffer));
-      console.log(`✅ تم استقبال وحفظ الفيديو النهائي (${chunkBuffer.byteLength} بايت).`);
+      fs.writeFileSync('output.mp4', Buffer.from(chunkBuffer));
+      console.log(`✅ تم استقبال وحفظ الفيديو النهائي.`);
       done = true;
     }
   });
 
-  // 2. حقن HTML ومكتبة الـ Muxer الأساسية (Web Muxer لتغليف WebCodecs)
   await page.setContent(`
     <html>
-    <head>
-      <script src="https://unpkg.com/mp4-muxer@4.0.1/dist/mp4-muxer.min.js"></script>
-    </head>
-    <body style="margin: 0; background: black;">
+    <head><script src="https://unpkg.com/mp4-muxer@4.0.1/dist/mp4-muxer.min.js"></script></head>
+    <body style="margin:0; background:black;">
       <canvas id="c" width="1280" height="720"></canvas>
       <script>
-        // تعريف سياق الكانفاس
-        const canvas = document.getElementById('c');
-        const ctx = canvas.getContext('2d');
-        const width = 1280;
-        const height = 720;
-        const fps = 30;
-        const totalFrames = 90; // 3 ثواني للتجربة
-
-        async function startWebCodecsRender() {
-          console.log("🎥 بدء عملية الريندر عبر WebCodecs...");
-
-          // أ. إعداد الـ Muxer لتغليف الفيديو في حاوية MP4
+        async function run() {
+          console.log("🎥 جاري بدء الريندر...");
           const muxer = new Mp4Muxer.Muxer({
             target: new Mp4Muxer.ArrayBufferTarget(),
-            video: {
-              codec: 'avc', // استخدام h264
-              width: width,
-              height: height
-            },
-            fastStart: 'fragmented' // مناسب للتدفق
+            video: { codec: 'avc', width: 1280, height: 720 },
+            fastStart: 'fragmented'
           });
 
-          // ب. إعداد الـ VideoEncoder (WebCodecs API)
           const encoder = new VideoEncoder({
-            output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata), // إرسال الخام لـ Muxer
-            error: (e) => console.error(e),
+            output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata),
+            error: (e) => console.error("Encoder Error:", e)
           });
 
-          const config = {
-            codec: 'avc1.42E01E', // h264 baseline
-            width: width,
-            height: height,
-            bitrate: 4_000_000, // 4 Mbps لضمان الجودة
-            framerate: fps,
-          };
-          
-          // التأكد من دعم المتصفح للإعدادات
-          const support = await VideoEncoder.isConfigSupported(config);
-          if (!support.supported) {
-            console.error("❌ المتصفح لا يدعم إعدادات WebCodecs هذه.");
-            return;
-          }
-          encoder.configure(config);
+          encoder.configure({ codec: 'avc1.42E01E', width: 1280, height: 720, bitrate: 4_000_000 });
 
-          // ج. حلقة الريندر (حقن كود المستخدم ورسم الفريمات)
-          for (let i = 0; i < totalFrames; i++) {
-            ctx.clearRect(0, 0, width, height);
-            const t = i / fps; // توفير متغير الزمن لكود المستخدم
-            
-            // --- حقن كود المستخدم هنا ---
-            try {
-              ${userCode}
-            } catch (e) { console.error("Error in User Code:", e); }
-            // ---------------------------
+          const canvas = document.getElementById('c');
+          const ctx = canvas.getContext('2d');
 
-            // تحويل الكانفاس لـ VideoFrame (قلب WebCodecs)
-            const frame = new VideoFrame(canvas, { timestamp: i * (1_000_000 / fps) }); // تحويل الميكروثانية
+          for (let i = 0; i < 90; i++) {
+            ctx.clearRect(0,0,1280,720);
+            const t = i/30;
+            try { ${userCode} } catch(e) {}
             
-            // إرسال الفريم للإنكودر (Keyframe كل ثانيتين كحد أقصى)
-            encoder.encode(frame, { keyFrame: i % 60 === 0 });
-            frame.close(); // إغلاق الفريم لتوفير الذاكرة
+            const frame = new VideoFrame(canvas, { timestamp: i * 33333 }); // 30fps
+            encoder.encode(frame, { keyFrame: i % 30 === 0 });
+            frame.close();
           }
 
-          // د. إنهاء العملية
           await encoder.flush();
-          muxer.finalize(); // إنهاء ملف MP4 في الذاكرة
-
-          // هـ. إرسال ملف الـ MP4 النهائي (ArrayBuffer) إلى Node.js عبر الجسر
-          const buffer = muxer.target.buffer;
-          await sendMp4ChunkToNode(buffer); 
+          muxer.finalize();
+          console.log("🏁 الريندر اكتمل، جاري إرسال الملف...");
+          window.saveMp4ChunkToNode(muxer.target.buffer);
         }
-
-        // بدء التنفيذ
-        startWebCodecsRender();
+        run();
       </script>
     </body>
     </html>
   `);
 
-  // 3. انتظار جيتهاب حتى ينتهي المتصفح من الريندر (الوصول لإشارة Done عبر الجسر)
+  // حماية: لو السكريبت مخلصش في دقيقتين اقفله
+  const timeout = setTimeout(() => {
+    console.log("❌ التوقيت انتهى! السكريبت علّق.");
+    process.exit(1);
+  }, 120000); 
+
   await new Promise(resolve => {
     const check = setInterval(() => {
       if (done) {
+        clearTimeout(timeout);
         clearInterval(check);
         resolve();
       }
-    }, 100);
+    }, 500);
   });
 
   await browser.close();
-  console.log("✅ اكتملت عملية الريندر عبر WebCodecs وتم حفظ الملف!");
+  console.log("🚀 انتهى كل شيء بنجاح.");
 })();
