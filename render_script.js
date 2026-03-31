@@ -4,12 +4,16 @@ const path = require('path');
 
 const userCode = process.env.USER_CODE || '';
 
-// قراءة المكتبة اللي حملناها بـ wget من الفولدر الرئيسي
+// قراءة ملف المكتبة اللي نزلناه بالـ curl
 const muxerLibPath = path.resolve('mp4-muxer.js');
+if (!fs.existsSync(muxerLibPath)) {
+    console.error("❌ ملف mp4-muxer.js مش موجود! التحميل فشل.");
+    process.exit(1);
+}
 const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
 
 (async () => {
-  console.log("🚀 بدء تشغيل المتصفح...");
+  console.log("🚀 جاري تشغيل المتصفح وتحضير الريندر...");
   
   const browser = await chromium.launch({
     args: [
@@ -23,7 +27,7 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
   
   const page = await browser.newPage();
 
-  // إظهار اللوجات عشان نتابع الخطوات
+  // لوجات المتصفح عشان نشوف لو في مصيبة حصلت جوه
   page.on('console', msg => console.log('BROWSER:', msg.text()));
   page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));
 
@@ -31,7 +35,7 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
   await page.exposeFunction('saveMp4ChunkToNode', (chunkBuffer) => {
     if (chunkBuffer) {
       fs.writeFileSync('output.mp4', Buffer.from(chunkBuffer));
-      console.log(`✅ تم استقبال وحفظ الفيديو النهائي (output.mp4)`);
+      console.log(`✅ عااش! الفيديو اتحفظ في output.mp4`);
       done = true;
     }
   });
@@ -46,9 +50,8 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
       <script>
         async function run() {
           try {
-            console.log("🎥 بدء الريندر...");
-            if (typeof Mp4Muxer === 'undefined') throw new Error("Muxer library failed to load!");
-
+            console.log("🎥 الريندر بدأ فعلياً...");
+            
             const muxer = new Mp4Muxer.Muxer({
               target: new Mp4Muxer.ArrayBufferTarget(),
               video: { codec: 'avc', width: 1280, height: 720 },
@@ -64,36 +67,35 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
               codec: 'avc1.42E01E', 
               width: 1280, 
               height: 720, 
-              bitrate: 2_000_000 
+              bitrate: 2_500_000 
             });
 
             const canvas = document.getElementById('c');
             const ctx = canvas.getContext('2d');
 
-            // ريندر لـ 90 فريم (3 ثواني)
+            // ريندر 90 فريم (3 ثواني)
             for (let i = 0; i < 90; i++) {
               ctx.clearRect(0, 0, 1280, 720);
               const t = i / 30;
               
-              // تنفيذ كود المستخدم
               try { 
                 ${userCode} 
-              } catch(e) { console.error("User JS Error:", e); }
+              } catch(e) { console.error("User Code Error:", e); }
               
               const frame = new VideoFrame(canvas, { timestamp: i * 33333 });
               encoder.encode(frame, { keyFrame: i % 30 === 0 });
               frame.close();
               
-              if (i % 30 === 0) console.log("⏳ شغال في فريم: " + i);
+              if (i % 30 === 0) console.log("⏳ شغال في الثانية: " + (i/30));
             }
 
             await encoder.flush();
             muxer.finalize();
-            console.log("🏁 خلصت ريندر، ببعت الداتا...");
+            console.log("🏁 الريندر خلص بنجاح!");
             window.saveMp4ChunkToNode(muxer.target.buffer);
 
           } catch(err) {
-            console.error("Critical Error:", err.message);
+            console.error("Critical Render Error:", err.message);
           }
         }
         run();
@@ -102,9 +104,9 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
     </html>
   `);
 
-  // لو السكربت علق أكتر من 3 دقائق يقفل عشان ميحرقش وقت
+  // لو زاد عن 3 دقائق يبقى في حاجة غلط
   const timeout = setTimeout(() => {
-    console.log("❌ Timeout: السكريبت علق أو خد وقت طويل.");
+    console.log("❌ السكربت علق وقفلت المهمة.");
     process.exit(1);
   }, 180000); 
 
@@ -119,5 +121,5 @@ const muxerScriptContent = fs.readFileSync(muxerLibPath, 'utf8');
   });
 
   await browser.close();
-  console.log("🚀 المهمة تمت بنجاح.");
+  console.log("🚀 تمت المهمة بنجاح يا بطل.");
 })();
