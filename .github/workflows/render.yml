@@ -1,46 +1,82 @@
-name: Ofoq Video Renderer (FFmpeg Final)
+name: Ofoq Studio — Server Renderer
 
 on:
+  # ── الإطلاق الفوري من التطبيق ───────────────────────────────────────────
   workflow_dispatch:
     inputs:
-      js_code:
-        description: 'JS Code to render'
+      job_id:
+        description: 'Firestore Job ID (من أفق ستوديو)'
         required: true
+        type: string
+
+  # ── جدولة 24/7: كل 5 دقائق لالتقاط المهام المعلقة ─────────────────────
+  # هذا يضمن أن أي مهمة تُرسل من المتصفح ستُعالج خلال 5 دقائق كحد أقصى
+  # حتى لو فشل الـ workflow_dispatch
+  schedule:
+    - cron: '*/5 * * * *'   # كل 5 دقائق — معالجة المهام المعلقة
+    - cron: '0 */2 * * *'   # كل ساعتين — keep-alive لمنع إيقاف الـ scheduled workflows
+
+# منع تشغيل أكثر من workflow لنفس الريبو في نفس الوقت
+concurrency:
+  group: renderer
+  cancel-in-progress: false
 
 jobs:
-  build-video:
+  render:
+    name: Render Video Job
     runs-on: ubuntu-latest
+    # الحد الأقصى 360 دقيقة (6 ساعات) — أطول ريندر ممكن نظرياً
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout Repository
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      # ── 2. Node.js ─────────────────────────────────────────────────────────
+      - name: 🟢 Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          # تثبيت ffmpeg و xvfb والمكتبات المساعدة للصور
-          sudo apt-get install -y ffmpeg xvfb libgbm-dev
-          
-      - name: Install Node Dependencies
-        run: |
-          npm install playwright
-          npx playwright install chromium
+          cache: 'npm'
 
-      - name: Render Video Frames & Merge
+      # ── 3. Dependencies ────────────────────────────────────────────────────
+      - name: 📦 Install npm dependencies
+        run: npm ci
+
+      # ── 4. Puppeteer Chrome ────────────────────────────────────────────────
+      - name: 🌐 Install Puppeteer Chrome
+        run: npx puppeteer browsers install chrome
+
+      # ── 5. FFmpeg ──────────────────────────────────────────────────────────
+      - name: 🎬 Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+
+      # ── 6. System fonts (Arabic support) ──────────────────────────────────
+      - name: 🔤 Install Arabic fonts
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            fonts-noto-core fonts-noto-arabic fonts-freefont-ttf \
+            fonts-dejavu-core fonts-liberation
+          fc-cache -fv
+
+      # ── 7. Run Renderer ────────────────────────────────────────────────────
+      - name: 🎥 Run Ofoq Renderer
         env:
-          USER_CODE: ${{ github.event.inputs.js_code }}
-        run: |
-          mkdir -p frames
-          # تشغيل السكريبت اللي بيصور الفريمات وبعدين بيجمعها
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node render_script.js
+          # job_id من workflow_dispatch — فارغ في الحالة المجدولة (يبحث تلقائياً)
+          JOB_ID:                     ${{ github.event.inputs.job_id }}
+          GH_PAT:                     ${{ secrets.GH_PAT }}
+          FIREBASE_SERVICE_ACCOUNT:   ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GITHUB_OWNER:               mohamedreyad11111
+          GITHUB_REPO_NAME:           render
+        run: node renderer.js
 
-      - name: Upload Video Result
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ofoq_Rendered_Video
-          path: output.mp4
-          if-no-files-found: error
+      # ── 8. Cleanup (نظّف الملفات المؤقتة دائماً) ──────────────────────────
+      - name: 🧹 Cleanup temp files
+        if: always()
+        run: |
+          rm -rf /tmp/frames_* /tmp/output_* 2>/dev/null || true
+          echo "✓ Cleanup done"
