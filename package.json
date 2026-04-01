@@ -1,0 +1,27 @@
+{
+  "name": "ofoq-studio-renderer",
+  "version": "1.0.0",
+  "description": "Ofoq Studio — GitHub Actions Server-Side Video Renderer (FFmpeg + Puppeteer)",
+  "main": "renderer.js",
+  "scripts": {
+    "render": "node renderer.js",
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.1.1",
+    "firebase-admin": "^12.3.1",
+    "puppeteer": "^22.12.1"
+  },
+  "keywords": [
+    "ofoq-studio",
+    "video-renderer",
+    "github-actions",
+    "ffmpeg",
+    "puppeteer"
+  ],
+  "license": "UNLICENSED",
+  "private": true
+}
