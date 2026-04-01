@@ -42,7 +42,7 @@ jobs:
 
       # ── 3. Dependencies ────────────────────────────────────────────────────
       - name: 📦 Install npm dependencies
-        run: npm ci
+        run: npm install
 
       # ── 4. Puppeteer Chrome ────────────────────────────────────────────────
       - name: 🌐 Install Puppeteer Chrome
