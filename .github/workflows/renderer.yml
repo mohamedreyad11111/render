@@ -1,7 +1,6 @@
 name: Ofoq Studio — Server Renderer
 
 on:
-  # ── الإطلاق الفوري من التطبيق ───────────────────────────────────────────
   workflow_dispatch:
     inputs:
       job_id:
@@ -9,14 +8,10 @@ on:
         required: true
         type: string
 
-  # ── جدولة 24/7: كل 5 دقائق لالتقاط المهام المعلقة ─────────────────────
-  # هذا يضمن أن أي مهمة تُرسل من المتصفح ستُعالج خلال 5 دقائق كحد أقصى
-  # حتى لو فشل الـ workflow_dispatch
   schedule:
-    - cron: '*/5 * * * *'   # كل 5 دقائق — معالجة المهام المعلقة
-    - cron: '0 */2 * * *'   # كل ساعتين — keep-alive لمنع إيقاف الـ scheduled workflows
+    - cron: '*/5 * * * *'
+    - cron: '0 */2 * * *'
 
-# منع تشغيل أكثر من workflow لنفس الريبو في نفس الوقت
 concurrency:
   group: renderer
   cancel-in-progress: false
@@ -25,47 +20,38 @@ jobs:
   render:
     name: Render Video Job
     runs-on: ubuntu-latest
-    # الحد الأقصى 360 دقيقة (6 ساعات) — أطول ريندر ممكن نظرياً
     timeout-minutes: 360
 
     steps:
-      # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Node.js ─────────────────────────────────────────────────────────
       - name: 🟢 Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # ── 3. Dependencies ────────────────────────────────────────────────────
       - name: 📦 Install npm dependencies
         run: npm install
 
-      # ── 4. Puppeteer Chrome ────────────────────────────────────────────────
       - name: 🌐 Install Puppeteer Chrome
         run: npx puppeteer browsers install chrome
 
-      # ── 5. FFmpeg ──────────────────────────────────────────────────────────
       - name: 🎬 Install FFmpeg
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg
           ffmpeg -version | head -1
 
-      # ── 6. System fonts (Arabic support) ──────────────────────────────────
       - name: 🔤 Install Arabic fonts
         run: |
           sudo apt-get install -y --no-install-recommends \
-            fonts-noto-core fonts-noto-arabic fonts-freefont-ttf \
+            fonts-noto fonts-freefont-ttf \
             fonts-dejavu-core fonts-liberation
           fc-cache -fv
 
-      # ── 7. Run Renderer ────────────────────────────────────────────────────
       - name: 🎥 Run Ofoq Renderer
         env:
-          # job_id من workflow_dispatch — فارغ في الحالة المجدولة (يبحث تلقائياً)
           JOB_ID:                     ${{ github.event.inputs.job_id }}
           GH_PAT:                     ${{ secrets.GH_PAT }}
           FIREBASE_SERVICE_ACCOUNT:   ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
@@ -73,7 +59,6 @@ jobs:
           GITHUB_REPO_NAME:           render
         run: node renderer.js
 
-      # ── 8. Cleanup (نظّف الملفات المؤقتة دائماً) ──────────────────────────
       - name: 🧹 Cleanup temp files
         if: always()
         run: |
