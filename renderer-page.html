@@ -2,7 +2,6 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ofoq Studio — Server Renderer Page</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -10,29 +9,65 @@
   canvas { display: block; }
 </style>
 
-<!-- Three.js r157 — نفس الإصدار المستخدم في أفق ستوديو -->
+<!-- ══ Polyfills — أول شيء يُحمَّل قبل أي كود ══════════════════════════════ -->
+<script>
+// ── roundRect polyfill (Chrome القديم في Puppeteer) ────────────────────────
+(function() {
+  function _roundRect(x, y, w, h, r) {
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+    var tl, tr, br, bl;
+    if (!r) { tl = tr = br = bl = 0; }
+    else if (typeof r === 'number') {
+      r = Math.min(r, w / 2, h / 2);
+      tl = tr = br = bl = r;
+    } else if (Array.isArray(r)) {
+      var a = r.map(function(v){ return Math.min(+v || 0, w/2, h/2); });
+      if (a.length === 1) { tl = tr = br = bl = a[0]; }
+      else if (a.length === 2) { tl = br = a[0]; tr = bl = a[1]; }
+      else if (a.length === 3) { tl = a[0]; tr = bl = a[1]; br = a[2]; }
+      else { tl = a[0]; tr = a[1]; br = a[2]; bl = a[3]; }
+    } else { tl = tr = br = bl = 0; }
+    this.beginPath();
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.arcTo(x + w, y,     x + w, y + tr,     tr);
+    this.lineTo(x + w, y + h - br);
+    this.arcTo(x + w, y + h, x + w - br, y + h, br);
+    this.lineTo(x + bl, y + h);
+    this.arcTo(x,     y + h, x,     y + h - bl, bl);
+    this.lineTo(x, y + tl);
+    this.arcTo(x,     y,     x + tl, y,          tl);
+    this.closePath();
+    return this;
+  }
+  var protos = [
+    typeof CanvasRenderingContext2D !== 'undefined'         && CanvasRenderingContext2D.prototype,
+    typeof OffscreenCanvasRenderingContext2D !== 'undefined' && OffscreenCanvasRenderingContext2D.prototype,
+    typeof Path2D !== 'undefined'                            && Path2D.prototype
+  ];
+  protos.forEach(function(p){ if (p && !p.roundRect) p.roundRect = _roundRect; });
+})();
+
+// ── structuredClone polyfill ────────────────────────────────────────────────
+if (typeof structuredClone === 'undefined') {
+  window.structuredClone = function(o) { return JSON.parse(JSON.stringify(o)); };
+}
+
+// ── requestAnimationFrame stub (headless) ──────────────────────────────────
+if (typeof requestAnimationFrame === 'undefined') {
+  window.requestAnimationFrame = function(cb) { return setTimeout(cb, 16); };
+  window.cancelAnimationFrame  = clearTimeout;
+}
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
-<!-- GSAP 3 — للمشاهد التي تستخدم Timeline animations -->
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <script>
-/* ════════════════════════════════════════════════════════════════════════════
- * Ofoq Studio — Headless Scene Renderer
- *
- * هذه الصفحة تُحمَّل بواسطة Puppeteer في GitHub Actions.
- * البيانات تُحقن قبل تحميل الصفحة عبر:
- *   page.evaluateOnNewDocument(() => { window.__SCENE_DATA__ = { ... }; })
- *
- * بعد التهيئة، يعرض:
- *   window.__READY__  = 'ok' | 'error'
- *   window.__ERROR__  = رسالة الخطأ (إذا فشل)
- *   window.renderFrame(frameIndex) → PNG dataURL
- * ════════════════════════════════════════════════════════════════════════════ */
-
-// ── easing helpers — نفس ما يُحقن في كود المشهد في أفق ستوديو ───────────────
 const EASING_SRC = `
   function easeInOut(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}
   function easeIn(t){return t*t*t;}
@@ -44,99 +79,68 @@ const EASING_SRC = `
   function easeOutCubic(t){return 1-Math.pow(1-t,3);}
   function easeInOutCubic(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;}
   function easeOutElastic(t){const c4=2*Math.PI/3;return t===0?0:t===1?1:Math.pow(2,-10*t)*Math.sin((t*10-0.75)*c4)+1;}
-  function easeOutBounce(t){const n1=7.5625,d1=2.75;if(t<1/d1){return n1*t*t;}else if(t<2/d1){return n1*(t-=1.5/d1)*t+0.75;}else if(t<2.5/d1){return n1*(t-=2.25/d1)*t+0.9375;}else{return n1*(t-=2.625/d1)*t+0.984375;}}
+  function easeOutBounce(t){const n1=7.5625,d1=2.75;if(t<1/d1)return n1*t*t;if(t<2/d1)return n1*(t-=1.5/d1)*t+.75;if(t<2.5/d1)return n1*(t-=2.25/d1)*t+.9375;return n1*(t-=2.625/d1)*t+.984375;}
   function lerp(a,b,t){return a+(b-a)*t;}
   function clamp(v,mn,mx){return Math.min(Math.max(v,mn),mx);}
   function map(v,a,b,c,d){return c+(d-c)*(v-a)/(b-a);}
+  (function(){function _rr(x,y,w,h,r){var tl,tr,br,bl;if(!r){tl=tr=br=bl=0;}else if(typeof r==='number'){r=Math.min(r,w/2,h/2);tl=tr=br=bl=r;}else{var a=r.map(function(v){return Math.min(+v||0,w/2,h/2);});tl=a[0]||0;tr=a[1]||0;br=a[2]||0;bl=a[3]||0;}this.beginPath();this.moveTo(x+tl,y);this.lineTo(x+w-tr,y);this.arcTo(x+w,y,x+w,y+tr,tr);this.lineTo(x+w,y+h-br);this.arcTo(x+w,y+h,x+w-br,y+h,br);this.lineTo(x+bl,y+h);this.arcTo(x,y+h,x,y+h-bl,bl);this.lineTo(x,y+tl);this.arcTo(x,y,x+tl,y,tl);this.closePath();return this;}if(typeof CanvasRenderingContext2D!=='undefined'&&!CanvasRenderingContext2D.prototype.roundRect)CanvasRenderingContext2D.prototype.roundRect=_rr;})();
 `;
 
 async function initScene() {
   const D = window.__SCENE_DATA__;
-  if (!D) {
-    window.__ERROR__ = 'لا توجد بيانات مشهد (window.__SCENE_DATA__ فارغ)';
-    window.__READY__ = 'error';
-    return;
-  }
+  if (!D) { window.__ERROR__ = 'لا توجد بيانات مشهد'; window.__READY__ = 'error'; return; }
 
   const { code, cfg, fonts, images, bg } = D;
-
-  // ── إعداد الـ Canvas ──────────────────────────────────────────────────────
-  const canvas  = document.getElementById('c');
-  canvas.width  = cfg.w  || 1920;
-  canvas.height = cfg.h  || 1080;
+  const canvas = document.getElementById('c');
+  canvas.width = cfg.w || 1920; canvas.height = cfg.h || 1080;
   document.body.style.background = bg || '#000';
-
   const ctx = canvas.getContext('2d', { alpha: false });
 
-  // ── تحميل الخطوط ──────────────────────────────────────────────────────────
-  const fontList = Array.isArray(fonts) ? fonts : [];
-  for (const fontEntry of fontList) {
+  for (const fe of (Array.isArray(fonts) ? fonts : [])) {
     try {
-      // fontEntry قد يكون URL أو { name, url }
-      const fontUrl  = typeof fontEntry === 'string' ? fontEntry : fontEntry.url;
-      const fontName = typeof fontEntry === 'string'
-        ? fontEntry.split('/').pop().replace(/\.[^.]+$/, '').replace(/[-_+]/g, ' ')
-        : (fontEntry.name || 'CustomFont');
-      const face = new FontFace(fontName, `url(${fontUrl})`);
-      await face.load();
-      document.fonts.add(face);
-      console.log(`✓ Font loaded: ${fontName}`);
-    } catch(e) {
-      console.warn(`⚠ Font load failed:`, e.message);
-    }
+      const url  = typeof fe === 'string' ? fe : fe.url;
+      const name = typeof fe === 'string'
+        ? fe.split('/').pop().replace(/\.[^.]+$/, '').replace(/[-_+]/g, ' ')
+        : (fe.name || 'CustomFont');
+      const face = new FontFace(name, 'url(' + url + ')');
+      await face.load(); document.fonts.add(face);
+      console.log('✓ Font:', name);
+    } catch(e) { console.warn('⚠ Font failed:', e.message); }
   }
 
-  // ── تحميل الصور ───────────────────────────────────────────────────────────
   const preloadedImages = {};
-  const imageMap = images || {};
-  for (const [key, url] of Object.entries(imageMap)) {
-    await new Promise(resolve => {
-      const img     = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload  = () => { preloadedImages[key] = img; resolve(); };
-      img.onerror = (e) => { console.warn(`⚠ Image load failed [${key}]:`, url); resolve(); };
+  for (const [k, url] of Object.entries(images || {})) {
+    await new Promise(r => {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => { preloadedImages[k] = img; r(); };
+      img.onerror = () => { console.warn('⚠ Img failed:', k); r(); };
       img.src = url;
     });
   }
 
-  // ── Three.js إعداد ────────────────────────────────────────────────────────
-  let scene3D, camera3D, renderer3D;
+  let scene3D = null, camera3D = null, renderer3D = null;
   try {
-    renderer3D = new THREE.WebGLRenderer({
-      alpha: true, antialias: true, preserveDrawingBuffer: true
-    });
-    renderer3D.setSize(cfg.w, cfg.h);
-    renderer3D.setClearColor(0x000000, 0);
-    scene3D  = new THREE.Scene();
-    camera3D = new THREE.PerspectiveCamera(45, cfg.w / cfg.h, 0.1, 1000);
-  } catch(e) {
-    console.warn('⚠ Three.js init failed (no GPU):', e.message);
-    scene3D = camera3D = renderer3D = null;
-  }
+    renderer3D = new THREE.WebGLRenderer({ alpha:true, antialias:true, preserveDrawingBuffer:true });
+    renderer3D.setSize(cfg.w, cfg.h); renderer3D.setClearColor(0x000000, 0);
+    scene3D = new THREE.Scene();
+    camera3D = new THREE.PerspectiveCamera(45, cfg.w/cfg.h, 0.1, 1000);
+  } catch(e) { console.warn('⚠ No GPU:', e.message); }
 
-  // ── الثوابت ───────────────────────────────────────────────────────────────
-  const totalF = Math.round((cfg.dur || 10) * (cfg.fps || 60));
+  const totalF = Math.round((cfg.dur||10) * (cfg.fps||60));
 
-  // ── GSAP ─────────────────────────────────────────────────────────────────
-  const gsapInst = window.gsap || null;
-  const registeredTLs = [];
-  const _ofoqRegisterTL = (tl) => { registeredTLs.push(tl); return tl; };
-
-  // ── تجميع كود المشهد ────────────────────────────────────────────────────
-  const src = `"use strict";
-    const W=${cfg.w},H=${cfg.h},FPS=${cfg.fps||60},DURATION=${cfg.dur||10},TOTAL_FRAMES=${totalF};
-    const canvas=arguments[0], ctx=arguments[1], images=arguments[2];
-    const THREE=arguments[3], scene3D=arguments[4], camera3D=arguments[5], renderer3D=arguments[6];
-    const maplibre=null, mapGL=null;
-    const gifGetFrame=()=>null;
-    const gsap=arguments[10];
-    const TimelineMax=gsap?gsap.timeline.bind(gsap):null;
-    const TweenMax=gsap;
-    const _ofoqRegisterTL=arguments[11]||(x=>x);
-    ${EASING_SRC}
-    ${code}
-    if(typeof drawScene!=='function') throw new Error('الدالة drawScene غير موجودة في كود المشهد!');
-    return drawScene;`;
+  const src = '"use strict";' +
+    'const W='+cfg.w+',H='+cfg.h+',FPS='+(cfg.fps||60)+',DURATION='+(cfg.dur||10)+',TOTAL_FRAMES='+totalF+';' +
+    'const canvas=arguments[0],ctx=arguments[1],images=arguments[2];' +
+    'const THREE=arguments[3],scene3D=arguments[4],camera3D=arguments[5],renderer3D=arguments[6];' +
+    'const maplibre=null,mapGL=null,gifGetFrame=function(){return null;};' +
+    'const gsap=arguments[10];' +
+    'const TimelineMax=gsap?gsap.timeline.bind(gsap):null;' +
+    'const TweenMax=gsap;' +
+    'const _ofoqRegisterTL=arguments[11]||(function(x){return x;});' +
+    EASING_SRC +
+    code +
+    '\nif(typeof drawScene!=="function") throw new Error("drawScene غير موجودة!");' +
+    '\nreturn drawScene;';
 
   let drawFn;
   try {
@@ -145,67 +149,36 @@ async function initScene() {
       (typeof THREE !== 'undefined' ? THREE : null),
       scene3D, camera3D, renderer3D,
       null, null, null,
-      gsapInst,
-      _ofoqRegisterTL
+      window.gsap || null,
+      function(tl){ return tl; }
     );
-    console.log('✓ Scene compiled successfully');
+    console.log('✓ Scene compiled');
   } catch(e) {
-    window.__ERROR__ = 'خطأ في تجميع كود المشهد: ' + e.message;
+    window.__ERROR__ = 'خطأ في الكود: ' + e.message;
     window.__READY__ = 'error';
-    console.error('Scene compile error:', e);
+    console.error('Compile error:', e.message);
     return;
   }
 
-  // ── دالة رسم الإطار المكشوفة لـ Puppeteer ───────────────────────────────
-  window.renderFrame = function(frameIndex) {
-    try {
-      // مسح الخلفية
-      ctx.fillStyle = bg || '#000000';
-      ctx.fillRect(0, 0, cfg.w, cfg.h);
-      // استدعاء دالة المشهد
-      drawFn(frameIndex);
-      // إذا كان Three.js مستخدماً، ارسم على الـ canvas 2D
-      if (renderer3D && scene3D && camera3D) {
-        renderer3D.render(scene3D, camera3D);
-        ctx.drawImage(renderer3D.domElement, 0, 0, cfg.w, cfg.h);
-      }
-      return canvas.toDataURL('image/png');
-    } catch(e) {
-      console.error(`Frame ${frameIndex} error:`, e.message);
-      throw e;
+  window.renderFrame = function(fi) {
+    ctx.fillStyle = bg || '#000000';
+    ctx.fillRect(0, 0, cfg.w, cfg.h);
+    drawFn(fi);
+    if (renderer3D && scene3D && camera3D) {
+      renderer3D.render(scene3D, camera3D);
+      ctx.drawImage(renderer3D.domElement, 0, 0, cfg.w, cfg.h);
     }
+    return canvas.toDataURL('image/png');
   };
 
   window.getTotalFrames = function() { return totalF; };
   window.__READY__ = 'ok';
-  console.log(`✓ Renderer ready: ${cfg.w}x${cfg.h} @ ${cfg.fps}fps, ${totalF} frames`);
+  console.log('✓ Ready: '+cfg.w+'x'+cfg.h+' @ '+(cfg.fps||60)+'fps — '+totalF+' frames');
 }
 
- // ── Polyfill: ctx.roundRect (غير مدعوم في Chrome القديم) ─────────────────
-if (!CanvasRenderingContext2D.prototype.roundRect) {
-  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
-    if (typeof r === 'number') r = [r, r, r, r];
-    const [tl = 0, tr = 0, br = 0, bl = 0] = Array.isArray(r) ? r : [r];
-    this.beginPath();
-    this.moveTo(x + tl, y);
-    this.lineTo(x + w - tr, y);
-    this.arcTo(x + w, y, x + w, y + tr, tr);
-    this.lineTo(x + w, y + h - br);
-    this.arcTo(x + w, y + h, x + w - br, y + h, br);
-    this.lineTo(x + bl, y + h);
-    this.arcTo(x, y + h, x, y + h - bl, bl);
-    this.lineTo(x, y + tl);
-    this.arcTo(x, y, x + tl, y, tl);
-    this.closePath();
-    return this;
-  };
-}
-// ── تشغيل عند تحميل الصفحة ──────────────────────────────────────────────
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initScene);
-} else {
-  initScene();
-}
+} else { initScene(); }
 </script>
 </body>
-</html>
+ </html>
